@@ -1,22 +1,28 @@
-# Purpose: Installs osquery on the host
-# Note: by default, osquery will be configured to connect to the Fleet server on the "logger" host via TLS.
+# Purpose: Installs osquery on the host. Osquery conntects to Fleet via TLS.
 
 Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Installing osquery..."
 $flagfile = "c:\Program Files\osquery\osquery.flags"
 choco install -y --limit-output --no-progress osquery | Out-String  # Apparently Out-String makes the process wait
 $service = Get-WmiObject -Class Win32_Service -Filter "Name='osqueryd'"
 If (-not ($service)) {
-  Write-Host "Setting osquery to run as a service"
+  Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Setting osquery to run as a service"
   New-Service -Name "osqueryd" -BinaryPathName "C:\Program Files\osquery\osqueryd\osqueryd.exe --flagfile=`"C:\Program Files\osquery\osquery.flags`""
 
   # Download the flags file from the Palantir osquery-configuration Github
   # GitHub requires TLS 1.2 as of 2/1/2018
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  # Disabling the progress bar speeds up IWR https://github.com/PowerShell/PowerShell/issues/2138
+  $ProgressPreference = 'SilentlyContinue'
   Invoke-WebRequest -Uri "https://raw.githubusercontent.com/palantir/osquery-configuration/master/Classic/Endpoints/Windows/osquery.flags" -OutFile $flagfile
 
   ## Use the TLS config
   ## Add entry to hosts file for Kolide for SSL validation
+  If (Select-String -Path "c:\windows\system32\drivers\etc\hosts" -Pattern "kolide") {
+    Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Hosts file already updated. Moving on."
+  } Else {
+  Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) Adding kolide to the hosts file"
   Add-Content "c:\windows\system32\drivers\etc\hosts" "        192.168.38.105    kolide"
+  }
   ## Add kolide secret and avoid BOM
   $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
   [System.IO.File]::WriteAllLines("c:\Program Files\osquery\kolide_secret.txt", "enrollmentsecret", $Utf8NoBomEncoding)
@@ -34,7 +40,7 @@ If (-not ($service)) {
   Start-Service osqueryd
 }
 else {
-  Write-Host "osquery is already installed. Moving On."
+  Write-Host "$('[{0:HH:mm}]' -f (Get-Date)) osquery is already installed. Moving On."
 }
 If ((Get-Service -name osqueryd).Status -ne "Running")
 {
